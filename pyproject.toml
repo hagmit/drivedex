@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "drivedex"
+version = "0.2.0"
+description = "Local, private index of SharePoint / OneDrive / Google Drive with SSO sign-in, change log, HTML browser and Office-to-Markdown (standard library only)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "hagmit" }]
+dependencies = []
+keywords = ["sharepoint", "onedrive", "google-drive", "microsoft-graph", "index", "search", "markdown", "docx", "xlsx", "pptx", "llm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Natural Language :: Japanese",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Office/Business",
+    "Topic :: System :: Filesystems",
+    "Topic :: Text Processing :: Markup :: Markdown",
+]
+
+[project.urls]
+Homepage = "https://github.com/hagmit/drivedex"
+Issues = "https://github.com/hagmit/drivedex/issues"
+
+[project.scripts]
+drivedex = "drivedex.cli:main"
+
+[tool.setuptools]
+packages = ["drivedex", "drivedex.providers"]

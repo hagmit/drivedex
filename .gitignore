@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.drivedex/
+*.db
+drivedex.html
+*.prof
+p.out
+dist/
