@@ -20,7 +20,7 @@ SharePoint Online・OneDrive・Google ドライブのファイル構成を、**S
 | `drivedex search <語> [<語>...]` | ファイル名で検索（スペース区切りで AND） |
 | `drivedex changes [--days 7]` | 最近の追加・更新・削除 |
 | `drivedex view` | 索引を**1枚の HTML** にして開く。検索・フォルダ移動・お気に入りをブラウザだけで（22万件で読み込み約0.2秒、検索約0.2〜0.3秒） |
-| `drivedex get <ソース番号> <パス> [--md]` | ダウンロード。Google ドキュメント／スプレッドシート／スライドは docx／xlsx／pptx に変換。`--md` を付けると Markdown（`<元の名前>.md`）も作る |
+| `drivedex get <ソース番号> <パス> [--md]` | ダウンロード。Google ドキュメント／スプレッドシート／スライドは docx／xlsx／pptx、図形描画は PDF に変換（フォームなどそれ以外の Google 形式は不可）。ファイル名に使えない文字（`/` `:` など）は `_` に置き換える。`--md` を付けると Markdown（`<元の名前>.md`）も作る |
 | `drivedex md <ファイル>... [-o 出力先] [--stdout]` | 手元の docx／xlsx／pptx を Markdown に変換（AI に読ませる前の下ごしらえ） |
 
 ビューアのキー操作：`j`/`k` 上下、`Enter` 開く、`u`/`Backspace` 上へ、`s` お気に入り、`/` 検索、`Esc` 検索解除。

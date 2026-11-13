@@ -1,6 +1,7 @@
 """Provider interface shared by Microsoft Graph and Google Drive."""
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
 
@@ -36,6 +37,19 @@ class SourceSpec:
     label: str
     drive_id: str
     root_id: str | None = None
+
+
+_BAD_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
+_RESERVED = re.compile(r"(?i)(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?")
+
+
+def safe_filename(name: str) -> str:
+    """A cloud file name made safe as one local file name on Windows and POSIX.
+    Google allows '/' and ':' in names; those must never become path separators."""
+    s = _BAD_CHARS.sub("_", name).rstrip(" .")
+    if not s:
+        return "_"
+    return "_" + s if _RESERVED.fullmatch(s) else s
 
 
 class NotConfigured(Exception):
