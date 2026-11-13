@@ -5,7 +5,7 @@ import os
 import urllib.parse
 
 from .. import http
-from .base import Cursor, Deleted, Item, OAuthProvider, ResyncRequired, SourceSpec
+from .base import Cursor, Deleted, Item, OAuthProvider, ResyncRequired, SourceSpec, safe_filename
 
 GRAPH = "https://graph.microsoft.com/v1.0"
 SELECT = "id,name,parentReference,size,lastModifiedDateTime,lastModifiedBy,webUrl,folder,file,deleted,root"
@@ -110,7 +110,7 @@ class GraphProvider(OAuthProvider):
         yield from self._walk(cursor)
 
     def download(self, spec: SourceSpec, item: Item, dest_dir) -> str:
-        dest = os.path.join(dest_dir, item.name)
+        dest = os.path.join(dest_dir, safe_filename(item.name))
         http.download(f"{GRAPH}/drives/{spec.drive_id}/items/{item.item_id}/content", dest,
                       token=self.access_token())
         return dest

@@ -9,7 +9,7 @@ import sys
 import webbrowser
 from pathlib import Path
 
-from . import __version__, officemd, providers
+from . import __version__, http, officemd, providers
 from .config import Config
 from .index import Index
 from .providers import NotConfigured, NotLoggedIn, ResyncRequired
@@ -230,7 +230,7 @@ def main(argv=None):
     app = App(Path(a.home) if a.home else None)
     try:
         return a.func(app, a) or 0
-    except (NotConfigured, NotLoggedIn, ValueError, KeyError) as e:
+    except (NotConfigured, NotLoggedIn, ValueError, KeyError, http.HttpError) as e:
         print(f"エラー: {e}", file=sys.stderr)
         return 2
     finally:
