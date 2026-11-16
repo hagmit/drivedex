@@ -19,3 +19,6 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python -m unittest -v
+        env:
+          # Windows runners register and delete a real scheduled task (tests/test_notify.py)
+          DRIVEDEX_TEST_SCHTASKS: ${{ matrix.os == 'windows-latest' && '1' || '' }}

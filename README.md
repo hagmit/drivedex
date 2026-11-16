@@ -19,6 +19,7 @@ SharePoint Online・OneDrive・Google ドライブのファイル構成を、**S
 | `drivedex sync [--full]` | 初回は全件、以後は**変更分だけ**取得（Graph の delta、Drive の changes）。変更の目印が失効していたら自動で全件を取り直す |
 | `drivedex search <語> [<語>...]` | ファイル名で検索（スペース区切りで AND） |
 | `drivedex changes [--days 7]` | 最近の追加・更新・削除 |
+| `drivedex schedule on [--every 60] [--folder /設計]` / `off` / `status` | 変更の定期取得と通知（Windows のタスク スケジューラに登録。下の「定期取得と通知」） |
 | `drivedex view` | 索引を**1枚の HTML** にして開く。検索・フォルダ移動・お気に入りをブラウザだけで（22万件で読み込み約0.2秒、検索約0.2〜0.3秒） |
 | `drivedex get <ソース番号> <パス> [--md]` | ダウンロード。Google ドキュメント／スプレッドシート／スライドは docx／xlsx／pptx、図形描画は PDF に変換（フォームなどそれ以外の Google 形式は不可）。ファイル名に使えない文字（`/` `:` など）は `_` に置き換える。`--md` を付けると Markdown（`<元の名前>.md`）も作る |
 | `drivedex md <ファイル>... [-o 出力先] [--stdout]` | 手元の docx／xlsx／pptx を Markdown に変換（AI に読ませる前の下ごしらえ） |
@@ -130,6 +131,20 @@ drivedex view
 
 設定・索引・トークンの置き場所は、通常は `%LOCALAPPDATA%\drivedex`、Microsoft Store 版の Python では `%USERPROFILE%\.drivedex` です（Store 版は AppData への書き込みを専用フォルダへ振り替えるため、ブラウザから HTML が見えなくなる）。`--home` か環境変数 `DRIVEDEX_HOME` で変えられます。
 
+### 4. 定期取得と通知（任意）
+
+```
+drivedex schedule on --every 60 --folder /設計 --folder /営業
+```
+
+- 60 分ごとに全ソースの変更分を取り、前回からの変更があれば Windows の通知を出します。通知をクリックすると、直近 7 日の変更一覧（`changes.html`、今回の新着に色付き）が開きます。同じ内容は `changes.log` にも1行ずつ残ります
+- `--folder` を付けると、そのフォルダの中（下の階層も含む）の変更だけ通知します。パスは `drivedex search` で表示される形（ソースの中のパス）で、すべてのソースに当てはめます。付けずに `on` し直すと前の指定のまま、`--all-folders` で絞り込みをやめます
+- 間隔は 5〜1440 分。ログオン中だけ動きます（トークンの復号と通知に、利用者のログオンが要るため）。スリープ中に過ぎた回は、復帰後に1回だけ実行されます。前の回が終わっていなければ次の回は飛ばします
+- サインインが切れたドライブがあると「取得できなかったドライブがあります」と通知します（同じ内容は一度だけ）。`drivedex login ...` でサインインし直せば戻ります。ほかのドライブの取得は止まりません
+- **Google の OAuth アプリが「テスト」状態のままだと、リフレッシュトークンが 7 日で切れます**。定期取得を使うなら、Google Cloud の「OAuth 同意画面」でアプリを「本番環境」にしてください（自分で使う範囲なら審査を通さずに切り替えられ、サインイン時の「確認されていません」の表示が残るだけです）。テストのままでも、週に一度 `drivedex login google` し直せば使えます
+- 止めるときは `drivedex schedule off`、様子を見るときは `drivedex schedule status`。手で1回だけ動かすなら `drivedex sync --notify`
+- Windows 以外では自動登録はせず、cron に足す1行を表示します（通知は `changes.html` と `changes.log` だけ）
+
 ## 設計メモ
 
 - 取得の流れ：プロバイダ（`providers/msgraph.py`、`providers/gdrive.py`）が Item／Deleted／Cursor を順に流し、`index.py` が1トランザクションで SQLite に反映します。途中で失敗したら丸ごと巻き戻すので、索引が半端な状態になりません
@@ -144,7 +159,7 @@ drivedex view
 python -m unittest -v
 ```
 
-API の応答を模したページで、索引の差分反映・巻き戻し・目印の失効時の全件取り直し・OAuth の往復（ループバックの受け口まで）・DPAPI の暗号化・HTML への安全な埋め込み・Office 変換を確かめます。
+API の応答を模したページで、索引の差分反映・巻き戻し・目印の失効時の全件取り直し・OAuth の往復（ループバックの受け口まで）・DPAPI の暗号化・HTML への安全な埋め込み・Office 変換・Google ドキュメント類の書き出しから Markdown まで・定期取得の通知（新着の判定、フォルダの絞り込み、エラーの通知、二重起動の防止）を確かめます。Windows の CI では、タスク スケジューラへの登録と削除を実際に行います（`DRIVEDEX_TEST_SCHTASKS=1` のときだけ）。
 
 実機での確認状況：Google（個人アカウントのマイドライブ）でサインイン・全件取得・差分取得・削除の反映・ダウンロードを確認済み。Microsoft（SharePoint / OneDrive）は模擬テストのみです。
 
@@ -159,7 +174,6 @@ API の応答を模したページで、索引の差分反映・巻き戻し・�
 ## 今後の予定（案）
 
 - 複数アカウント・複数テナントの切り替え UI
-- 変更の定期取得（タスク スケジューラ登録）と通知
 - 配布用の署名付き実行ファイル、配布元のアプリ登録（Microsoft の発行元確認、Google の OAuth 審査）
 
 ## ライセンス
