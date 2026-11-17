@@ -50,5 +50,8 @@ class Config:
 
     def set_provider(self, name: str, values: dict) -> None:
         self.data.setdefault(name, {}).update({k: v for k, v in values.items() if v is not None})
+        self.save()
+
+    def save(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(self.data, ensure_ascii=False, indent=2), "utf-8")

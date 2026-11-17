@@ -4,10 +4,11 @@ from __future__ import annotations
 import os
 
 from .. import http
-from .base import Cursor, Deleted, Item, OAuthProvider, ResyncRequired, SourceSpec
+from .base import Cursor, Deleted, Item, OAuthProvider, ResyncRequired, SourceSpec, safe_filename
 
 API = "https://www.googleapis.com/drive/v3"
-FOLDER = "application/vnd.google-apps.folder"
+GOOGLE_APPS = "application/vnd.google-apps."
+FOLDER = GOOGLE_APPS + "folder"
 FILE_FIELDS = "id,name,mimeType,parents,size,modifiedTime,lastModifyingUser/displayName,webViewLink,trashed"
 MY_DRIVE = "mydrive"
 ORPHAN = "~orphan"  # shared-with-me items have no parent in our tree
@@ -19,7 +20,9 @@ EXPORT = {
         ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xlsx"),
     "application/vnd.google-apps.presentation":
         ("application/vnd.openxmlformats-officedocument.presentationml.presentation", ".pptx"),
+    "application/vnd.google-apps.drawing": ("application/pdf", ".pdf"),
 }
+EXPORT_LIMIT_HINT = "10MB を超えるため Google 側で書き出せません。ブラウザで開いて「ファイル > ダウンロード」を使ってください"
 
 
 def to_item(f: dict):
@@ -114,12 +117,24 @@ class DriveProvider(OAuthProvider):
             token = page["nextPageToken"]
 
     def download(self, spec: SourceSpec, item: Item, dest_dir) -> str:
-        if item.mime in EXPORT:
-            mime, ext = EXPORT[item.mime]
-            url = http.with_params(f"{API}/files/{item.item_id}/export", {"mimeType": mime})
-            dest = os.path.join(dest_dir, item.name + ext)
+        mime = item.mime or ""
+        name = item.name
+        if mime in EXPORT:
+            export_mime, ext = EXPORT[mime]
+            url = http.with_params(f"{API}/files/{item.item_id}/export", {"mimeType": export_mime})
+            if not name.lower().endswith(ext):  # converted uploads keep names like "報告.docx"
+                name += ext
+        elif mime.startswith(GOOGLE_APPS):
+            kind = mime[len(GOOGLE_APPS):]
+            raise ValueError(f"Google の {kind} 形式はダウンロードできません（ドキュメント・スプレッドシート・"
+                             f"スライド・図形描画のみ書き出せます）。ブラウザで開いてください: {item.name}")
         else:
             url = http.with_params(f"{API}/files/{item.item_id}", {"alt": "media", "supportsAllDrives": "true"})
-            dest = os.path.join(dest_dir, item.name)
-        http.download(url, dest, token=self.access_token())
+        dest = os.path.join(dest_dir, safe_filename(name))
+        try:
+            http.download(url, dest, token=self.access_token())
+        except http.HttpError as e:
+            if e.status == 403 and "exportSizeLimitExceeded" in e.body:
+                raise ValueError(f"{EXPORT_LIMIT_HINT}: {item.name}") from None
+            raise
         return dest

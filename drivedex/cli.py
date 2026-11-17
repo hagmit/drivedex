@@ -9,9 +9,9 @@ import sys
 import webbrowser
 from pathlib import Path
 
-from . import __version__, officemd, providers
+from . import __version__, http, notify, officemd, providers, schedule
 from .config import Config
-from .index import Index
+from .index import Index, local_time
 from .providers import NotConfigured, NotLoggedIn, ResyncRequired
 from .secure_store import TokenStore
 from .viewer import export
@@ -82,6 +82,10 @@ def cmd_remove(app, a):
 
 
 def cmd_sync(app, a):
+    if a.notify:
+        if a.ids or a.full:
+            raise ValueError("--notify はすべてのソースを差分で取得します（番号や --full とは併用できません）")
+        return notify.run(app)
     targets = [app.index.source(i) for i in a.ids] if a.ids else app.index.sources()
     if not targets:
         print("ソースがありません（drivedex add ...）")
@@ -102,8 +106,7 @@ def cmd_changes(app, a):
     rows = app.index.changes(_since(a.days))
     mark = {"added": "+", "modified": "~", "deleted": "-"}
     for r in rows:
-        where = r["path"] if r["kind"] != "deleted" else r["name"]
-        print(f"{r['at'][:16].replace('T', ' ')} {mark[r['kind']]} [{r['source_id']}]{where}")
+        print(f"{local_time(r['at'])} {mark[r['kind']]} [{r['source_id']}]{r['path']}")
     print(f"-- 直近 {a.days:g} 日の変更 {len(rows)} 件", file=sys.stderr)
 
 
@@ -130,6 +133,39 @@ def cmd_get(app, a):
             print(officemd.convert_file(dest))
         else:
             print(f"Markdown 変換の対象外です（docx / xlsx / pptx のみ）: {Path(dest).name}", file=sys.stderr)
+
+
+def cmd_schedule(app, a):
+    cfg = app.config.data.setdefault("notify", {})
+    if a.action == "on":
+        every = schedule.check_every(a.every)
+        if a.all_folders:
+            cfg["folders"] = []
+        elif a.folder:
+            cfg["folders"] = sorted({notify.normalize_folder(f) for f in a.folder})
+        cfg["every"] = every
+        app.config.save()
+        if os.name == "nt":
+            schedule.install(app.config.root, every)
+            print(f"{every} 分ごとに変更を取得して通知します（タスク スケジューラ「{schedule.TASK}」）")
+        else:
+            print("自動登録は Windows のみです。cron に次の1行を足してください（通知は changes.html と changes.log のみ）:")
+            print(schedule.cron_line(every, sys.executable, schedule.arguments(app.config.root)))
+    elif a.action == "off":
+        if os.name == "nt":
+            print("止めました" if schedule.remove() else "登録されていません")
+        else:
+            print("cron に足した行を消してください")
+    if a.action in ("on", "status"):
+        folders = notify.folders(app.config)
+        print("通知の対象: " + ("、".join(folders) if folders else "すべてのフォルダ"))
+    if a.action == "status":
+        if os.name == "nt":
+            print(schedule.status() or "タスク スケジューラには登録されていません")
+        st = notify.load_state(app.config.root / notify.STATE)
+        print(f"前回の通知: {local_time(st['last']) if st.get('last') else '未実行'}")
+        if st.get("error"):
+            print("前回のエラー:\n" + st["error"])
 
 
 def cmd_md(app, a):
@@ -190,7 +226,16 @@ def build_parser():
     p = sub.add_parser("sync", help="変更分を取得（初回は全件）")
     p.add_argument("ids", nargs="*", type=int)
     p.add_argument("--full", action="store_true", help="全件を取り直す")
+    p.add_argument("--notify", action="store_true",
+                   help="すべてのソースを取得し、前回からの変更を通知（schedule on で登録されるもの）")
     p.set_defaults(func=cmd_sync)
+
+    p = sub.add_parser("schedule", help="変更の定期取得と通知（Windows のタスク スケジューラ）")
+    p.add_argument("action", choices=["on", "off", "status"])
+    p.add_argument("--every", type=int, default=60, help="間隔（分、既定 60）")
+    p.add_argument("--folder", action="append", help="このフォルダの中の変更だけ通知（複数可。例 /設計）")
+    p.add_argument("--all-folders", action="store_true", help="フォルダの絞り込みをやめる")
+    p.set_defaults(func=cmd_schedule)
 
     p = sub.add_parser("search", help="ファイル名で検索（スペース区切りで AND）")
     p.add_argument("terms", nargs="+")
@@ -230,7 +275,7 @@ def main(argv=None):
     app = App(Path(a.home) if a.home else None)
     try:
         return a.func(app, a) or 0
-    except (NotConfigured, NotLoggedIn, ValueError, KeyError) as e:
+    except (NotConfigured, NotLoggedIn, ValueError, KeyError, http.HttpError) as e:
         print(f"エラー: {e}", file=sys.stderr)
         return 2
     finally:

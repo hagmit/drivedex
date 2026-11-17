@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS items(
   PRIMARY KEY(source_id, item_id));
 CREATE INDEX IF NOT EXISTS items_parent ON items(source_id, parent_id);
 CREATE TABLE IF NOT EXISTS changes(
-  source_id INTEGER NOT NULL, item_id TEXT NOT NULL, kind TEXT NOT NULL, name TEXT, at TEXT NOT NULL);
+  source_id INTEGER NOT NULL, item_id TEXT NOT NULL, kind TEXT NOT NULL, name TEXT, at TEXT NOT NULL,
+  path TEXT);
 CREATE INDEX IF NOT EXISTS changes_at ON changes(at);
 """
 
@@ -29,6 +30,11 @@ COLS = "item_id,parent_id,name,is_folder,size,mtime,modified_by,web_url,mime"
 
 def now_iso() -> str:
     return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
+
+
+def local_time(at: str) -> str:
+    """Stored UTC timestamp -> 'YYYY-MM-DD HH:MM' in the PC's time zone."""
+    return dt.datetime.fromisoformat(at).astimezone().strftime("%Y-%m-%d %H:%M")
 
 
 class Source:
@@ -47,6 +53,8 @@ class Index:
         self.db = sqlite3.connect(str(path), isolation_level=None)  # explicit transactions
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)
+        if "path" not in {r[1] for r in self.db.execute("PRAGMA table_info(changes)")}:
+            self.db.execute("ALTER TABLE changes ADD COLUMN path TEXT")  # index made by 0.2.0
 
     def close(self):
         self.db.close()
@@ -128,17 +136,21 @@ class Index:
             return
         stats[kind] += 1
         if record and not it.is_folder:
-            cur.execute("INSERT INTO changes VALUES(?,?,?,?,?)", (sid, it.item_id, kind, it.name, at))
+            cur.execute("INSERT INTO changes(source_id,item_id,kind,name,at) VALUES(?,?,?,?,?)",
+                        (sid, it.item_id, kind, it.name, at))
 
     def _delete(self, cur, sid, item_id, record, at, stats):
         old = cur.execute("SELECT name,is_folder FROM items WHERE source_id=? AND item_id=?",
                           (sid, item_id)).fetchone()
         if old is None:
             return
+        # the path is gone once the row is deleted; keep it so folder filters can match deletions
+        path = self.path_of(sid, item_id) if record and not old["is_folder"] else None
         cur.execute("DELETE FROM items WHERE source_id=? AND item_id=?", (sid, item_id))
         stats["deleted"] += 1
-        if record and not old["is_folder"]:
-            cur.execute("INSERT INTO changes VALUES(?,?,?,?,?)", (sid, item_id, "deleted", old["name"], at))
+        if path is not None:
+            cur.execute("INSERT INTO changes(source_id,item_id,kind,name,at,path) VALUES(?,?,?,?,?,?)",
+                        (sid, item_id, "deleted", old["name"], at, path))
 
     # queries ------------------------------------------------------------
     def items(self, source_id: int) -> list[sqlite3.Row]:
@@ -177,13 +189,22 @@ class Index:
                                    (source_id, node["item_id"], part)).fetchone()
         return node
 
-    def changes(self, since: str) -> list[dict]:
+    def changes(self, since: str, *, after: bool = False) -> list[dict]:
+        """Changes logged at or after `since` (strictly after with after=True), newest first.
+        `path` is the current path, or for deletions the path the file had when it was deleted."""
+        op = ">" if after else ">="
         rows = self.db.execute(
-            "SELECT c.source_id, s.label, c.item_id, c.kind, c.name, c.at FROM changes c "
-            "JOIN sources s ON s.id=c.source_id WHERE c.at >= ? ORDER BY c.at DESC, c.name", (since,)).fetchall()
+            "SELECT c.source_id, s.label, s.provider, c.item_id, c.kind, c.name, c.at, c.path AS old_path, "
+            "i.web_url, i.modified_by FROM changes c JOIN sources s ON s.id=c.source_id "
+            "LEFT JOIN items i ON i.source_id=c.source_id AND i.item_id=c.item_id "
+            f"WHERE c.at {op} ? ORDER BY c.at DESC, c.name", (since,)).fetchall()
         out = []
         for r in rows:
             d = dict(r)
-            d["path"] = self.path_of(r["source_id"], r["item_id"]) if r["kind"] != "deleted" else "(削除)"
+            old = d.pop("old_path")
+            if r["kind"] == "deleted":
+                d["path"] = old or r["name"]  # 0.2.0 did not keep the path of deleted files
+            else:
+                d["path"] = self.path_of(r["source_id"], r["item_id"])
             out.append(d)
         return out
